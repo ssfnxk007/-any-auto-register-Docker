@@ -10,18 +10,24 @@ RUN npm run build
 FROM python:3.12-slim
 
 # 系统依赖：Chromium、Xvfb、x11vnc、noVNC
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    # 浏览器运行依赖
-    chromium chromium-driver \
-    # 虚拟显示 + VNC
-    xvfb x11vnc \
-    # noVNC 依赖
-    novnc websockify \
-    # 其他
-    curl ca-certificates fonts-liberation libnss3 libatk-bridge2.0-0 \
-    libdrm2 libxcomposite1 libxdamage1 libxrandr2 libgbm1 libxkbcommon0 \
-    libasound2 libpango-1.0-0 libcairo2 libgtk-3-0 \
-    && rm -rf /var/lib/apt/lists/*
+RUN set -eux; \
+    export DEBIAN_FRONTEND=noninteractive; \
+    for attempt in 1 2 3; do \
+        apt-get update && apt-get install -y --no-install-recommends --fix-missing \
+        chromium chromium-driver \
+        xvfb x11vnc \
+        novnc websockify \
+        curl ca-certificates fonts-liberation libnss3 libatk-bridge2.0-0 \
+        libdrm2 libxcomposite1 libxdamage1 libxrandr2 libgbm1 libxkbcommon0 \
+        libasound2 libpango-1.0-0 libcairo2 libgtk-3-0 \
+        && rm -rf /var/lib/apt/lists/* \
+        && break; \
+        if [ "$attempt" -eq 3 ]; then exit 1; fi; \
+        apt-get -f install -y || true; \
+        apt-get clean; \
+        rm -rf /var/lib/apt/lists/*; \
+        sleep 5; \
+    done
 
 WORKDIR /app
 
@@ -43,7 +49,7 @@ COPY --from=frontend-builder /app/static ./static
 
 # 启动脚本
 COPY docker-entrypoint.sh /docker-entrypoint.sh
-RUN chmod +x /docker-entrypoint.sh
+RUN sed -i 's/\r$//' /docker-entrypoint.sh && chmod +x /docker-entrypoint.sh
 
 EXPOSE 8000 6080
 

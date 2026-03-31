@@ -130,6 +130,13 @@ def _create_laoudo(extra: dict, proxy: str | None) -> 'BaseMailbox':
     )
 
 
+def _create_custom_mail(extra: dict, proxy: str | None) -> 'BaseMailbox':
+    return CustomMailMailbox(
+        api_url=extra.get("custom_mail_api_url", ""),
+        proxy=proxy,
+    )
+
+
 MAILBOX_FACTORY_REGISTRY = {
     "tempmail_lol_api": _create_tempmail,
     "duckmail_api": _create_duckmail,
@@ -137,6 +144,7 @@ MAILBOX_FACTORY_REGISTRY = {
     "moemail_api": _create_moemail,
     "cfworker_admin_api": _create_cfworker,
     "laoudo_api": _create_laoudo,
+    "custom_mail_api": _create_custom_mail,
     # backward-compat fallback
     "tempmail_lol": _create_tempmail,
     "duckmail": _create_duckmail,
@@ -144,6 +152,7 @@ MAILBOX_FACTORY_REGISTRY = {
     "moemail": _create_moemail,
     "cfworker": _create_cfworker,
     "laoudo": _create_laoudo,
+    "custom_mail": _create_custom_mail,
 }
 
 
@@ -283,6 +292,114 @@ class LaoudoMailbox(BaseMailbox):
             except Exception:
                 pass
             time.sleep(4)
+        raise TimeoutError(f"等待验证链接超时 ({timeout}s)")
+
+
+class CustomMailMailbox(BaseMailbox):
+    """自建邮箱 API，要求提供 /api/generate 与 /api/emails/:email。"""
+
+    def __init__(self, api_url: str, proxy: str = None):
+        self.api = _normalize_api_base_url(api_url, default="https://mail.wyhsd.xyz", label="Custom Mail API URL")
+        self.proxy = {"http": proxy, "https": proxy} if proxy else None
+        self._session = None
+
+    def _get_session(self):
+        import requests
+
+        if self._session is None:
+            session = requests.Session()
+            session.proxies = self.proxy
+            self._session = session
+        return self._session
+
+    def _get_messages(self, email: str) -> list[dict]:
+        session = self._get_session()
+        from urllib.parse import quote
+
+        resp = session.get(f"{self.api}/api/emails/{quote(email, safe='@')}", timeout=15)
+        resp.raise_for_status()
+        data = resp.json()
+        return data if isinstance(data, list) else []
+
+    def get_email(self) -> MailboxAccount:
+        session = self._get_session()
+        resp = session.get(f"{self.api}/api/generate", timeout=15)
+        resp.raise_for_status()
+        data = resp.json()
+        email = str(data.get("email") or "").strip()
+        if not email:
+            raise RuntimeError("Custom Mail 生成邮箱失败: 返回结果缺少 email")
+        return MailboxAccount(
+            email=email,
+            account_id=email,
+            extra={
+                "provider_resource": {
+                    "provider_type": "mailbox",
+                    "provider_name": "custom_mail",
+                    "resource_type": "mailbox",
+                    "resource_identifier": email,
+                    "handle": email,
+                    "display_name": email,
+                    "metadata": {
+                        "email": email,
+                        "api_url": self.api,
+                    },
+                },
+            },
+        )
+
+    def get_current_ids(self, account: MailboxAccount) -> set:
+        try:
+            return {str(item.get("id", "")) for item in self._get_messages(account.email) if item.get("id")}
+        except Exception:
+            return set()
+
+    def wait_for_code(self, account: MailboxAccount, keyword: str = "",
+                      timeout: int = 120, before_ids: set = None, code_pattern: str = None) -> str:
+        import re
+        import time
+
+        seen = set(before_ids or [])
+        start = time.time()
+        pattern = re.compile(code_pattern or r'(?<!#)(?<!\d)(\d{6})(?!\d)')
+        while time.time() - start < timeout:
+            try:
+                for msg in self._get_messages(account.email):
+                    mid = str(msg.get("id", ""))
+                    if not mid or mid in seen:
+                        continue
+                    seen.add(mid)
+                    text = " ".join(str(msg.get(key, "")) for key in ("subject", "text", "html"))
+                    if keyword and keyword.lower() not in text.lower():
+                        continue
+                    match = pattern.search(text)
+                    if match:
+                        return match.group(1) if match.groups() else match.group(0)
+            except Exception:
+                pass
+            time.sleep(3)
+        raise TimeoutError(f"等待验证码超时 ({timeout}s)")
+
+    def wait_for_link(self, account: MailboxAccount, keyword: str = "",
+                      timeout: int = 120, before_ids: set = None) -> str:
+        import time
+
+        seen = set(before_ids or [])
+        start = time.time()
+        while time.time() - start < timeout:
+            try:
+                for msg in self._get_messages(account.email):
+                    mid = str(msg.get("id", ""))
+                    if not mid or mid in seen:
+                        continue
+                    seen.add(mid)
+                    text = " ".join(str(msg.get(key, "")) for key in ("subject", "text", "html"))
+                    link = _extract_verification_link(text, keyword)
+                    if link:
+                        return link
+            except Exception:
+                pass
+            time.sleep(3)
         raise TimeoutError(f"等待验证链接超时 ({timeout}s)")
 
 

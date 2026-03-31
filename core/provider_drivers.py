@@ -105,6 +105,19 @@ MAILBOX_DRIVER_TEMPLATES = [
             {"key": "cfworker_fingerprint", "label": "Fingerprint", "placeholder": "6703363b...", "category": "auth"},
         ],
     },
+    {
+        "provider_type": "mailbox",
+        "driver_type": "custom_mail_api",
+        "label": "Custom Mail API",
+        "description": "自建邮箱 API，支持随机生成邮箱和按邮箱查询收件列表。",
+        "default_auth_mode": "endpoint_only",
+        "auth_modes": [
+            {"value": "endpoint_only", "label": "仅接口地址"},
+        ],
+        "fields": [
+            {"key": "custom_mail_api_url", "label": "API URL", "placeholder": "https://mail.example.com", "category": "connection"},
+        ],
+    },
 ]
 
 
@@ -193,6 +206,13 @@ BUILTIN_PROVIDER_DEFINITIONS = [
         "label": "CF Worker（自建域名）",
         "description": "使用你自己的域名和 Worker 邮件服务。",
         "driver_type": "cfworker_admin_api",
+    },
+    {
+        "provider_type": "mailbox",
+        "provider_key": "custom_mail",
+        "label": "Custom Mail（自建邮箱）",
+        "description": "对接你自己的邮箱 API，调用 generate 与 emails 查询接口。",
+        "driver_type": "custom_mail_api",
     },
     {
         "provider_type": "captcha",

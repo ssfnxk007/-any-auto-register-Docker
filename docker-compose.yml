@@ -1,12 +1,13 @@
 services:
   app:
-    build: .
+    image: docker.dev.justwei.com/ssfnxk/any-auto-register-app:latest
+    container_name: any-auto-register
     ports:
       - "8000:8000"   # FastAPI / Web UI
       - "6080:6080"   # noVNC (headed 浏览器预览)
     environment:
       - DISPLAY=:99
-      # 可选：设置 VNC 密码，不设置则无密码
+      # 建议生产环境设置 VNC 密码；不需要 noVNC 时也可以直接删掉 6080 端口映射
       # - VNC_PASSWORD=changeme
     volumes:
       - ./data:/app/data   # 持久化 SQLite 数据库
