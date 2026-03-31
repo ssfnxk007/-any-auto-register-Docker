@@ -484,6 +484,12 @@ class RegistrationEngine:
                 self._log(f"账户创建失败: {response.text[:200]}", "warning")
                 return False
 
+            # 保存响应体，供后续提取 workspace_id
+            try:
+                self._create_account_response = response.json()
+            except Exception:
+                self._create_account_response = {}
+
             return True
 
         except Exception as e:
@@ -491,49 +497,71 @@ class RegistrationEngine:
             return False
 
     def _get_workspace_id(self) -> Optional[str]:
-        """获取 Workspace ID"""
+        """获取 Workspace ID，按优先级尝试三种方式"""
+        import base64
+        import json as json_module
+
+        # 方式 1：从 create_account 响应体里提取
         try:
-            auth_cookie = self.session.cookies.get("oai-client-auth-session")
-            if not auth_cookie:
-                self._log("未能获取到授权 Cookie", "error")
-                return None
-
-            # 解码 JWT
-            import base64
-            import json as json_module
-
-            try:
-                segments = auth_cookie.split(".")
-                if len(segments) < 1:
-                    self._log("授权 Cookie 格式错误", "error")
-                    return None
-
-                # 解码第二个 segment（JWT payload，含业务数据）
-                payload = segments[1]
-                pad = "=" * ((4 - (len(payload) % 4)) % 4)
-                decoded = base64.urlsafe_b64decode((payload + pad).encode("ascii"))
-                auth_json = json_module.loads(decoded.decode("utf-8"))
-
-                workspaces = auth_json.get("workspaces") or []
-                if not workspaces:
-                    self._log("授权 Cookie 里没有 workspace 信息", "error")
-                    return None
-
-                workspace_id = str((workspaces[0] or {}).get("id") or "").strip()
-                if not workspace_id:
-                    self._log("无法解析 workspace_id", "error")
-                    return None
-
-                self._log(f"Workspace ID: {workspace_id}")
-                return workspace_id
-
-            except Exception as e:
-                self._log(f"解析授权 Cookie 失败: {e}", "error")
-                return None
-
+            resp = getattr(self, "_create_account_response", None) or {}
+            # 响应体可能直接含 workspace_id 或 workspaces 列表
+            wid = str(resp.get("workspace_id") or "").strip()
+            if not wid:
+                workspaces = resp.get("workspaces") or []
+                wid = str((workspaces[0] or {}).get("id") or "").strip()
+            if wid:
+                self._log(f"Workspace ID (from create_account response): {wid}")
+                return wid
         except Exception as e:
-            self._log(f"获取 Workspace ID 失败: {e}", "error")
-            return None
+            self._log(f"从 create_account 响应提取 workspace_id 失败: {e}", "warning")
+
+        # 方式 2：从 oai-client-auth-session cookie 的各个 segment 尝试解码
+        try:
+            auth_cookie = self.session.cookies.get("oai-client-auth-session") or ""
+            if auth_cookie:
+                segments = auth_cookie.split(".")
+                for seg in segments:
+                    try:
+                        pad = "=" * ((4 - (len(seg) % 4)) % 4)
+                        decoded = base64.urlsafe_b64decode((seg + pad).encode("ascii"))
+                        # 尝试多种编码
+                        for enc in ("utf-8", "latin-1", "utf-16"):
+                            try:
+                                auth_json = json_module.loads(decoded.decode(enc))
+                                workspaces = auth_json.get("workspaces") or []
+                                wid = str((workspaces[0] or {}).get("id") or "").strip()
+                                if wid:
+                                    self._log(f"Workspace ID (from cookie): {wid}")
+                                    return wid
+                            except Exception:
+                                continue
+                    except Exception:
+                        continue
+        except Exception as e:
+            self._log(f"从 Cookie 提取 workspace_id 失败: {e}", "warning")
+
+        # 方式 3：直接调用 workspace 列表接口
+        try:
+            self._log("尝试从 workspace 列表接口获取 workspace_id...")
+            resp = self.session.get(
+                "https://auth.openai.com/api/accounts/workspaces",
+                headers={"accept": "application/json"},
+                timeout=15,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                workspaces = data if isinstance(data, list) else (data.get("workspaces") or [])
+                wid = str((workspaces[0] or {}).get("id") or "").strip()
+                if wid:
+                    self._log(f"Workspace ID (from workspaces API): {wid}")
+                    return wid
+            else:
+                self._log(f"workspace 列表接口返回: {resp.status_code}", "warning")
+        except Exception as e:
+            self._log(f"调用 workspace 列表接口失败: {e}", "warning")
+
+        self._log("所有方式均无法获取 workspace_id", "error")
+        return None
 
     def _select_workspace(self, workspace_id: str) -> Optional[str]:
         """选择 Workspace"""
