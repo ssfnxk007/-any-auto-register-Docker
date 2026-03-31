@@ -304,7 +304,12 @@ class ChatGPTBrowserRegister:
                 if page.query_selector('input[name="name"]'):
                     self.log("检测到关于您页面，填写姓名和生日")
                     _fill_profile(page, self.log)
-                    time.sleep(5)
+                    # 等待页面离开 about-you，最多等 30 秒
+                    for _ in range(30):
+                        time.sleep(1)
+                        if "about-you" not in page.url:
+                            self.log(f"已离开 about-you 页面: {page.url[:80]}")
+                            break
                     break
                 time.sleep(1)
 
