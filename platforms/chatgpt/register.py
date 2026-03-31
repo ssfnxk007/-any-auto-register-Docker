@@ -566,6 +566,45 @@ class RegistrationEngine:
             self._log(f"选择 Workspace 失败: {e}", "error")
             return None
 
+    def _extract_token_from_cookie(self) -> Optional[Dict[str, Any]]:
+        """从 oai-client-auth-session cookie 直接提取 access_token，跳过 OAuth callback。"""
+        try:
+            import base64, json as _json
+            auth_cookie = self.session.cookies.get("oai-client-auth-session")
+            if not auth_cookie:
+                self._log("未找到 oai-client-auth-session cookie", "warning")
+                return None
+
+            segments = auth_cookie.split(".")
+            if len(segments) < 2:
+                self._log("Cookie 格式异常，无法提取 token", "warning")
+                return None
+
+            # 优先从 payload（segment[1]）提取
+            for seg in (segments[1], segments[0]):
+                try:
+                    pad = "=" * ((4 - (len(seg) % 4)) % 4)
+                    decoded = base64.urlsafe_b64decode((seg + pad).encode("ascii"))
+                    data = _json.loads(decoded.decode("utf-8"))
+                    access_token = str(data.get("access_token") or "").strip()
+                    if access_token:
+                        self._log("从 Cookie 直接提取到 access_token")
+                        return {
+                            "access_token": access_token,
+                            "refresh_token": str(data.get("refresh_token") or "").strip(),
+                            "id_token": str(data.get("id_token") or "").strip(),
+                            "account_id": str(data.get("account_id") or "").strip(),
+                            "email": self.email,
+                        }
+                except Exception:
+                    continue
+
+            self._log("Cookie 里未找到 access_token", "warning")
+            return None
+        except Exception as e:
+            self._log(f"从 Cookie 提取 token 失败: {e}", "warning")
+            return None
+
     def _follow_redirects(self, start_url: str) -> Optional[str]:
         """跟随重定向链，寻找回调 URL"""
         try:
@@ -764,15 +803,21 @@ class RegistrationEngine:
             # 15. 跟随重定向链
             self._log("15. 跟随重定向链...")
             callback_url = self._follow_redirects(continue_url)
-            if not callback_url:
-                result.error_message = "跟随重定向链失败"
-                return result
 
-            # 16. 处理 OAuth 回调
-            self._log("16. 处理 OAuth 回调...")
-            token_info = self._handle_oauth_callback(callback_url)
+            # 16. 处理 OAuth 回调，失败时降级到从 Cookie 直接提取 token
+            token_info = None
+            if callback_url:
+                self._log("16. 处理 OAuth 回调...")
+                token_info = self._handle_oauth_callback(callback_url)
+                if not token_info:
+                    self._log("OAuth 回调失败，尝试从 Cookie 提取 token...", "warning")
+
             if not token_info:
-                result.error_message = "处理 OAuth 回调失败"
+                self._log("16. 从 Cookie 直接提取 access_token（跳过 OAuth callback）...")
+                token_info = self._extract_token_from_cookie()
+
+            if not token_info:
+                result.error_message = "无法获取 token：OAuth 回调失败且 Cookie 中未找到 access_token"
                 return result
 
             # 提取账户信息
