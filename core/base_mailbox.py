@@ -308,7 +308,9 @@ class CustomMailMailbox(BaseMailbox):
 
         if self._session is None:
             session = requests.Session()
-            session.proxies = self.proxy
+            # 显式设置代理，避免继承系统/环境变量代理
+            # 未配置代理时传空字典，阻止 requests 自动读取系统代理
+            session.proxies = self.proxy if self.proxy else {"http": "", "https": ""}
             self._session = session
         return self._session
 
