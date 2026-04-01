@@ -1,4 +1,5 @@
 """Task orchestration and persistence helpers."""
+
 from __future__ import annotations
 
 import json
@@ -14,7 +15,14 @@ from sqlmodel import Session, select, func
 from core.account_graph import patch_account_graph
 from core.base_platform import AccountStatus, RegisterConfig
 from core.datetime_utils import format_local_clock, serialize_datetime
-from core.db import AccountModel, TaskEventModel, TaskLog, TaskModel, engine, save_account
+from core.db import (
+    AccountModel,
+    TaskEventModel,
+    TaskLog,
+    TaskModel,
+    engine,
+    save_account,
+)
 from core.platform_accounts import build_platform_account
 from core.registry import get
 from infrastructure.platform_runtime import PlatformRuntime
@@ -64,7 +72,9 @@ def _serialize_datetime(value: datetime | None) -> str | None:
 def _json_default(value: Any) -> Any:
     if isinstance(value, datetime):
         return _serialize_datetime(value)
-    raise TypeError(f"Object of type {value.__class__.__name__} is not JSON serializable")
+    raise TypeError(
+        f"Object of type {value.__class__.__name__} is not JSON serializable"
+    )
 
 
 def _dump_json(data: Any) -> str:
@@ -94,7 +104,9 @@ def _mutate_task(task_id: str, fn: Callable[[TaskModel], None]) -> Optional[Task
             return task
 
 
-def _save_task_log(platform: str, email: str, status: str, error: str = "", detail: dict | None = None) -> None:
+def _save_task_log(
+    platform: str, email: str, status: str, error: str = "", detail: dict | None = None
+) -> None:
     with Session(engine) as session:
         log = TaskLog(
             platform=platform,
@@ -133,12 +145,20 @@ def serialize_task(task: TaskModel) -> dict[str, Any]:
         "platform": task.platform,
         "status": task.status,
         "terminal": task.status in TERMINAL_TASK_STATUSES,
-        "cancellable": task.status in {TASK_STATUS_PENDING, TASK_STATUS_CLAIMED, TASK_STATUS_RUNNING, TASK_STATUS_CANCEL_REQUESTED},
+        "cancellable": task.status
+        in {
+            TASK_STATUS_PENDING,
+            TASK_STATUS_CLAIMED,
+            TASK_STATUS_RUNNING,
+            TASK_STATUS_CANCEL_REQUESTED,
+        },
         "progress": f"{progress_current}/{progress_total}" if progress_total else "0/0",
         "progress_detail": {
             "current": progress_current,
             "total": progress_total,
-            "label": f"{progress_current}/{progress_total}" if progress_total else "0/0",
+            "label": f"{progress_current}/{progress_total}"
+            if progress_total
+            else "0/0",
         },
         "success": int(task.success_count or 0),
         "error_count": int(task.error_count or 0),
@@ -218,7 +238,9 @@ def create_account_check_task(account_id: int) -> dict[str, Any]:
     )
 
 
-def create_account_check_all_task(platform: str = "", limit: int = 50) -> dict[str, Any]:
+def create_account_check_all_task(
+    platform: str = "", limit: int = 50
+) -> dict[str, Any]:
     return create_task(
         task_type=TASK_TYPE_ACCOUNT_CHECK_ALL,
         platform=platform,
@@ -242,7 +264,9 @@ def get_task(task_id: str) -> Optional[dict[str, Any]]:
         return serialize_task(task) if task else None
 
 
-def list_tasks(*, platform: str = "", status: str = "", page: int = 1, page_size: int = 50) -> dict[str, Any]:
+def list_tasks(
+    *, platform: str = "", status: str = "", page: int = 1, page_size: int = 50
+) -> dict[str, Any]:
     page = max(page, 1)
     page_size = min(max(page_size, 1), 200)
     with Session(engine) as session:
@@ -257,10 +281,16 @@ def list_tasks(*, platform: str = "", status: str = "", page: int = 1, page_size
         q = q.order_by(TaskModel.created_at.desc())
         total = int(session.exec(total_q).one() or 0)
         items = session.exec(q.offset((page - 1) * page_size).limit(page_size)).all()
-    return {"total": total, "page": page, "items": [serialize_task(item) for item in items]}
+    return {
+        "total": total,
+        "page": page,
+        "items": [serialize_task(item) for item in items],
+    }
 
 
-def list_task_events(task_id: str, *, since: int = 0, limit: int = 200) -> list[dict[str, Any]]:
+def list_task_events(
+    task_id: str, *, since: int = 0, limit: int = 200
+) -> list[dict[str, Any]]:
     limit = min(max(limit, 1), 500)
     with Session(engine) as session:
         q = (
@@ -274,7 +304,14 @@ def list_task_events(task_id: str, *, since: int = 0, limit: int = 200) -> list[
     return [serialize_event(item) for item in items]
 
 
-def append_task_event(task_id: str, message: str, *, event_type: str = "log", level: str = "info", detail: dict | None = None) -> dict[str, Any]:
+def append_task_event(
+    task_id: str,
+    message: str,
+    *,
+    event_type: str = "log",
+    level: str = "info",
+    detail: dict | None = None,
+) -> dict[str, Any]:
     with Session(engine) as session:
         event = TaskEventModel(
             task_id=task_id,
@@ -350,7 +387,11 @@ def claim_next_runnable_task(
             payload = task.get_payload()
             platform = task.platform or str(payload.get("platform", "") or "")
             account_keys = _task_account_keys(task.type, payload)
-            if platform and running_platform_counts.get(platform, 0) >= max_parallel_per_platform:
+            if (
+                platform
+                and running_platform_counts.get(platform, 0)
+                >= max_parallel_per_platform
+            ):
                 continue
             if account_keys and busy_account_keys.intersection(account_keys):
                 continue
@@ -367,7 +408,14 @@ class TaskLogger:
     def __init__(self, task_id: str):
         self.task_id = task_id
 
-    def log(self, message: str, *, level: str = "info", event_type: str = "log", detail: dict | None = None) -> None:
+    def log(
+        self,
+        message: str,
+        *,
+        level: str = "info",
+        event_type: str = "log",
+        detail: dict | None = None,
+    ) -> None:
         append_task_event(
             self.task_id,
             message,
@@ -443,7 +491,15 @@ class TaskLogger:
                 task.error = error
 
         _mutate_task(self.task_id, _update)
-        event_level = "error" if status == TASK_STATUS_FAILED else ("warning" if status in {TASK_STATUS_INTERRUPTED, TASK_STATUS_CANCELLED} else "info")
+        event_level = (
+            "error"
+            if status == TASK_STATUS_FAILED
+            else (
+                "warning"
+                if status in {TASK_STATUS_INTERRUPTED, TASK_STATUS_CANCELLED}
+                else "info"
+            )
+        )
         self.log(
             f"任务结束: {status}",
             level=event_level,
@@ -479,7 +535,50 @@ def _auto_upload_cpa(task_logger: TaskLogger, account) -> None:
         task_logger.log(f"  [CPA] 自动上传异常: {exc}", level="warning")
 
 
-def _build_platform_instance(platform_name: str, payload: dict[str, Any], logger: TaskLogger, resolved_proxy: str | None = None):
+def _auto_upload_sub2api(task_logger: TaskLogger, account) -> None:
+    if getattr(account, "platform", "") != "chatgpt":
+        return
+    try:
+        from core.config_store import config_store
+
+        sub2api_base_url = config_store.get("sub2api_base_url", "")
+        sub2api_api_key = config_store.get("sub2api_api_key", "")
+        sub2api_admin_email = config_store.get("sub2api_admin_email", "")
+        sub2api_admin_password = config_store.get("sub2api_admin_password", "")
+        if not sub2api_base_url:
+            return
+        if not sub2api_api_key and not (sub2api_admin_email and sub2api_admin_password):
+            task_logger.log("  [Sub2Api] ✗ 未配置 API Key 或管理员账号，已跳过自动上传")
+            return
+
+        from platforms.chatgpt.sub2api_upload import (
+            DEFAULT_CHATGPT_CLIENT_ID,
+            upload_to_sub2api,
+        )
+
+        class _AccountProxy:
+            pass
+
+        target = _AccountProxy()
+        target.email = account.email
+        extra = account.extra or {}
+        target.access_token = extra.get("access_token") or account.token
+        target.refresh_token = extra.get("refresh_token", "")
+        target.id_token = extra.get("id_token", "")
+        target.client_id = extra.get("client_id", DEFAULT_CHATGPT_CLIENT_ID)
+
+        ok, msg = upload_to_sub2api(target)
+        task_logger.log(f"  [Sub2Api] {'✓ ' + msg if ok else '✗ ' + msg}")
+    except Exception as exc:
+        task_logger.log(f"  [Sub2Api] 自动上传异常: {exc}", level="warning")
+
+
+def _build_platform_instance(
+    platform_name: str,
+    payload: dict[str, Any],
+    logger: TaskLogger,
+    resolved_proxy: str | None = None,
+):
     from core.base_identity import normalize_identity_provider
     from core.base_mailbox import create_mailbox
 
@@ -492,11 +591,13 @@ def _build_platform_instance(platform_name: str, payload: dict[str, Any], logger
         proxy=resolved_proxy,
         extra=extra,
     )
-    identity_provider = normalize_identity_provider(extra.get("identity_provider", "mailbox"))
+    identity_provider = normalize_identity_provider(
+        extra.get("identity_provider", "mailbox")
+    )
     mailbox = None
     if identity_provider == "mailbox":
         mailbox = create_mailbox(
-            provider=extra.get("mail_provider", "moemail"),
+            provider=extra.get("mail_provider", "custom_mail"),
             extra=extra,
             proxy=resolved_proxy,
         )
@@ -510,7 +611,9 @@ def _build_platform_instance(platform_name: str, payload: dict[str, Any], logger
     return platform
 
 
-def _run_single_account_check(account_id: int, logger: TaskLogger | None = None) -> tuple[bool, dict[str, Any]]:
+def _run_single_account_check(
+    account_id: int, logger: TaskLogger | None = None
+) -> tuple[bool, dict[str, Any]]:
     with Session(engine) as session:
         model = session.get(AccountModel, account_id)
         if not model:
@@ -533,7 +636,12 @@ def _run_single_account_check(account_id: int, logger: TaskLogger | None = None)
             session.add(model)
             session.commit()
 
-    result = {"account_id": account_id, "valid": bool(valid), "platform": account.platform, "email": account.email}
+    result = {
+        "account_id": account_id,
+        "valid": bool(valid),
+        "platform": account.platform,
+        "email": account.email,
+    }
     if logger:
         logger.log(f"{account.email}: {'有效' if valid else '失效'}")
     return valid, result
@@ -593,7 +701,9 @@ def _execute_register_task(payload: dict[str, Any], logger: TaskLogger) -> None:
         if logger.is_cancel_requested():
             return "__cancel_requested__"
         resolved_proxy = proxy or proxy_pool.get_next()
-        platform = _build_platform_instance(platform_name, payload, logger, resolved_proxy=resolved_proxy)
+        platform = _build_platform_instance(
+            platform_name, payload, logger, resolved_proxy=resolved_proxy
+        )
         try:
             logger.log(f"开始注册第 {index + 1}/{count} 个账号")
             if resolved_proxy:
@@ -606,6 +716,7 @@ def _execute_register_task(payload: dict[str, Any], logger: TaskLogger) -> None:
             logger.log(f"✓ 注册成功: {account.email}")
             _save_task_log(platform_name, account.email, "success")
             _auto_upload_cpa(logger, account)
+            _auto_upload_sub2api(logger, account)
             cashier_url = (account.extra or {}).get("cashier_url", "")
             if cashier_url:
                 logger.log(f"  [升级链接] {cashier_url}")
@@ -625,7 +736,11 @@ def _execute_register_task(payload: dict[str, Any], logger: TaskLogger) -> None:
         completed = 0
         futures: dict[Any, int] = {}
         with ThreadPoolExecutor(max_workers=concurrency) as pool:
-            while submitted < count and len(futures) < concurrency and not logger.is_cancel_requested():
+            while (
+                submitted < count
+                and len(futures) < concurrency
+                and not logger.is_cancel_requested()
+            ):
                 futures[pool.submit(_do_one, submitted)] = submitted
                 submitted += 1
 
@@ -640,7 +755,11 @@ def _execute_register_task(payload: dict[str, Any], logger: TaskLogger) -> None:
                         success += 1
                     elif result != "__cancel_requested__":
                         errors.append(str(result))
-                while submitted < count and len(futures) < concurrency and not logger.is_cancel_requested():
+                while (
+                    submitted < count
+                    and len(futures) < concurrency
+                    and not logger.is_cancel_requested()
+                ):
                     futures[pool.submit(_do_one, submitted)] = submitted
                     submitted += 1
                 if logger.is_cancel_requested() and not futures:
@@ -655,7 +774,9 @@ def _execute_register_task(payload: dict[str, Any], logger: TaskLogger) -> None:
     if logger.is_cancel_requested():
         logger.finish(TASK_STATUS_CANCELLED, error="任务已取消")
         return
-    final_status = TASK_STATUS_FAILED if errors and success == 0 else TASK_STATUS_SUCCEEDED
+    final_status = (
+        TASK_STATUS_FAILED if errors and success == 0 else TASK_STATUS_SUCCEEDED
+    )
     final_error = "" if final_status == TASK_STATUS_SUCCEEDED else errors[0]
     logger.finish(final_status, error=final_error)
 
@@ -667,12 +788,16 @@ def _execute_platform_action_task(payload: dict[str, Any], logger: TaskLogger) -
     params = dict(payload.get("params") or {})
     runtime = PlatformRuntime()
     result = runtime.execute_action(
-        type("Command", (), {
-            "platform": command_platform,
-            "account_id": account_id,
-            "action_id": action_id,
-            "params": params,
-        })()
+        type(
+            "Command",
+            (),
+            {
+                "platform": command_platform,
+                "account_id": account_id,
+                "action_id": action_id,
+                "params": params,
+            },
+        )()
     )
     if not result.ok:
         logger.record_error(result.error)
@@ -703,7 +828,9 @@ def _execute_account_check_task(payload: dict[str, Any], logger: TaskLogger) -> 
         logger.finish(TASK_STATUS_FAILED, error=str(exc))
 
 
-def _execute_account_check_all_task(payload: dict[str, Any], logger: TaskLogger) -> None:
+def _execute_account_check_all_task(
+    payload: dict[str, Any], logger: TaskLogger
+) -> None:
     platform = str(payload.get("platform", "") or "")
     limit = max(int(payload.get("limit", 50) or 50), 1)
 

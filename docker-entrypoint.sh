@@ -4,6 +4,9 @@ set -e
 APP_PORT="${PORT:-8000}"
 ENABLE_NOVNC="${ENABLE_NOVNC:-false}"
 
+# 清理可能残留的 Xvfb 锁文件
+rm -f /tmp/.X11-unix/X99 /tmp/.X99-lock
+
 # 启动虚拟显示
 Xvfb :99 -screen 0 1280x800x24 -nolisten tcp &
 export DISPLAY=:99
@@ -23,5 +26,11 @@ if [ "$ENABLE_NOVNC" = "true" ]; then
     websockify --web=/usr/share/novnc 6080 localhost:5900 &
 fi
 
+if [ "$RELOAD" = "true" ]; then
+    RELOAD_ARGS="--reload"
+else
+    RELOAD_ARGS=""
+fi
+
 # 启动 FastAPI 后端
-exec uvicorn main:app --host 0.0.0.0 --port "$APP_PORT"
+exec uvicorn main:app --host 0.0.0.0 --port "$APP_PORT" $RELOAD_ARGS

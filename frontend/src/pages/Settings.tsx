@@ -208,6 +208,15 @@ const TABS: { id: string; label: string; icon: any; sections?: any[] }[] = [
         { key: 'cpa_api_key', label: 'API Key', secret: true },
       ],
     }, {
+      section: 'Sub2Api',
+      desc: '注册完成后自动上传到 Sub2Api 管理平台，可使用 API Key 或管理员账号登录',
+      items: [
+        { key: 'sub2api_base_url', label: 'Base URL', placeholder: 'http://127.0.0.1:8080' },
+        { key: 'sub2api_api_key', label: 'API Key', secret: true },
+        { key: 'sub2api_admin_email', label: 'Admin Email', placeholder: 'admin@example.com' },
+        { key: 'sub2api_admin_password', label: 'Admin Password', secret: true },
+      ],
+    }, {
       section: 'Team Manager',
       desc: '上传到自建 Team Manager 系统',
       items: [

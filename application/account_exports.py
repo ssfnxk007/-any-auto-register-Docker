@@ -52,7 +52,11 @@ def _timestamp_name(prefix: str, suffix: str) -> str:
 def _credential_value(item: AccountRecord, *keys: str) -> str:
     for key in keys:
         for credential in item.credentials or []:
-            if credential.get("scope") == "platform" and credential.get("key") == key and credential.get("value"):
+            if (
+                credential.get("scope") == "platform"
+                and credential.get("key") == key
+                and credential.get("value")
+            ):
                 return str(credential["value"])
     return ""
 
@@ -62,18 +66,24 @@ def _mailbox_provider_name(item: AccountRecord) -> str:
         if resource.get("resource_type") == "mailbox" and resource.get("provider_name"):
             return str(resource["provider_name"])
     for provider_account in item.provider_accounts or []:
-        if provider_account.get("provider_type") == "mailbox" and provider_account.get("provider_name"):
+        if provider_account.get("provider_type") == "mailbox" and provider_account.get(
+            "provider_name"
+        ):
             return str(provider_account["provider_name"])
     return ""
 
 
 def _chatgpt_export_payload(item: AccountRecord) -> dict:
-    access_token = _credential_value(item, "access_token", "accessToken", "legacy_token")
+    access_token = _credential_value(
+        item, "access_token", "accessToken", "legacy_token"
+    )
     refresh_token = _credential_value(item, "refresh_token", "refreshToken")
     id_token = _credential_value(item, "id_token", "idToken")
     session_token = _credential_value(item, "session_token", "sessionToken")
     workspace_id = _credential_value(item, "workspace_id", "workspaceId")
-    client_id = _credential_value(item, "client_id", "clientId") or DEFAULT_CHATGPT_CLIENT_ID
+    client_id = (
+        _credential_value(item, "client_id", "clientId") or DEFAULT_CHATGPT_CLIENT_ID
+    )
     cookies = _credential_value(item, "cookies", "cookie")
     account_id = item.user_id or ""
     email_service = _mailbox_provider_name(item)
@@ -125,39 +135,67 @@ def _generate_cpa_token_json(item: AccountRecord) -> dict:
 
 
 def _make_sub2api_json(item: AccountRecord) -> dict:
+    from datetime import datetime, timezone
+
+    payload = _chatgpt_export_payload(item)
+    credentials = {
+        "access_token": payload["access_token"],
+        "chatgpt_account_id": payload["account_id"],
+        "chatgpt_user_id": "",
+        "client_id": payload["client_id"],
+        "expires_at": payload["expires_at_unix"],
+        "expires_in": 863999,
+        "model_mapping": {
+            "gpt-5.1": "gpt-5.1",
+            "gpt-5.1-codex": "gpt-5.1-codex",
+            "gpt-5.1-codex-max": "gpt-5.1-codex-max",
+            "gpt-5.1-codex-mini": "gpt-5.1-codex-mini",
+            "gpt-5.2": "gpt-5.2",
+            "gpt-5.2-codex": "gpt-5.2-codex",
+        },
+        "organization_id": payload["workspace_id"],
+    }
+    if payload["refresh_token"]:
+        credentials["refresh_token"] = payload["refresh_token"]
+
+    account_entry = {
+        "name": payload["email"],
+        "platform": "openai",
+        "type": "oauth",
+        "credentials": credentials,
+        "extra": {},
+        "concurrency": 10,
+        "priority": 1,
+        "rate_multiplier": 1,
+        "auto_pause_on_expired": True,
+    }
+    return {
+        "data": {
+            "type": "sub2api-data",
+            "version": 1,
+            "exported_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "proxies": [],
+            "accounts": [account_entry],
+        }
+    }
+
+
+def _make_codex_cli_account(item: AccountRecord, index: int) -> dict:
     payload = _chatgpt_export_payload(item)
     return {
-        "proxies": [],
-        "accounts": [
-            {
-                "name": payload["email"],
-                "platform": "openai",
-                "type": "oauth",
-                "credentials": {
-                    "access_token": payload["access_token"],
-                    "chatgpt_account_id": payload["account_id"],
-                    "chatgpt_user_id": "",
-                    "client_id": payload["client_id"],
-                    "expires_at": payload["expires_at_unix"],
-                    "expires_in": 863999,
-                    "model_mapping": {
-                        "gpt-5.1": "gpt-5.1",
-                        "gpt-5.1-codex": "gpt-5.1-codex",
-                        "gpt-5.1-codex-max": "gpt-5.1-codex-max",
-                        "gpt-5.1-codex-mini": "gpt-5.1-codex-mini",
-                        "gpt-5.2": "gpt-5.2",
-                        "gpt-5.2-codex": "gpt-5.2-codex",
-                    },
-                    "organization_id": payload["workspace_id"],
-                    "refresh_token": payload["refresh_token"],
-                },
-                "extra": {},
-                "concurrency": 10,
-                "priority": 1,
-                "rate_multiplier": 1,
-                "auto_pause_on_expired": True,
-            }
-        ],
+        "name": f"openai-codex-oauth-{index}",
+        "platform": "openai",
+        "type": "oauth",
+        "credentials": {
+            "access_token": payload["access_token"],
+            "refresh_token": payload["refresh_token"],
+            "id_token": payload["id_token"],
+            "expires_at": payload["expires_at"] or "",
+            "client_id": payload["client_id"],
+        },
+        "extra": {
+            "codex_cli_only": True,
+        },
     }
 
 
@@ -168,30 +206,18 @@ class AccountExportsService:
     def export_chatgpt_json(self, selection: AccountExportSelection) -> ExportArtifact:
         items = self._load_chatgpt_items(selection)
         content = json.dumps(
-            [
-                {
-                    "email": payload["email"],
-                    "password": payload["password"],
-                    "client_id": payload["client_id"],
-                    "account_id": payload["account_id"],
-                    "workspace_id": payload["workspace_id"],
-                    "access_token": payload["access_token"],
-                    "refresh_token": payload["refresh_token"],
-                    "id_token": payload["id_token"],
-                    "session_token": payload["session_token"],
-                    "email_service": payload["email_service"],
-                    "registered_at": payload["registered_at"],
-                    "last_refresh": payload["last_refresh"],
-                    "expires_at": payload["expires_at"],
-                    "status": payload["status"],
-                }
-                for payload in [_chatgpt_export_payload(item) for item in items]
-            ],
+            {
+                "proxies": [],
+                "accounts": [
+                    _make_codex_cli_account(item, index)
+                    for index, item in enumerate(items, start=1)
+                ],
+            },
             ensure_ascii=False,
             indent=2,
         )
         return ExportArtifact(
-            filename=_timestamp_name("accounts", "json"),
+            filename=_timestamp_name("codex_accounts", "json"),
             media_type="application/json",
             content=content,
         )
@@ -246,7 +272,9 @@ class AccountExportsService:
             content=output.getvalue(),
         )
 
-    def export_chatgpt_sub2api(self, selection: AccountExportSelection) -> ExportArtifact:
+    def export_chatgpt_sub2api(
+        self, selection: AccountExportSelection
+    ) -> ExportArtifact:
         items = self._load_chatgpt_items(selection)
         if len(items) == 1:
             item = items[0]
@@ -275,7 +303,9 @@ class AccountExportsService:
         items = self._load_chatgpt_items(selection)
         if len(items) == 1:
             item = items[0]
-            content = json.dumps(_generate_cpa_token_json(item), ensure_ascii=False, indent=2)
+            content = json.dumps(
+                _generate_cpa_token_json(item), ensure_ascii=False, indent=2
+            )
             return ExportArtifact(
                 filename=f"{item.email}.json",
                 media_type="application/json",
@@ -287,7 +317,9 @@ class AccountExportsService:
             for item in items:
                 archive.writestr(
                     f"{item.email}.json",
-                    json.dumps(_generate_cpa_token_json(item), ensure_ascii=False, indent=2),
+                    json.dumps(
+                        _generate_cpa_token_json(item), ensure_ascii=False, indent=2
+                    ),
                 )
         buffer.seek(0)
         return ExportArtifact(
@@ -296,7 +328,9 @@ class AccountExportsService:
             content=buffer,
         )
 
-    def _load_chatgpt_items(self, selection: AccountExportSelection) -> list[AccountRecord]:
+    def _load_chatgpt_items(
+        self, selection: AccountExportSelection
+    ) -> list[AccountRecord]:
         selection.platform = selection.platform or CHATGPT_PLATFORM
         if selection.platform != CHATGPT_PLATFORM:
             raise ValueError("仅支持 ChatGPT 账号导出")

@@ -1,8 +1,10 @@
 """OpenAI 专用 HTTP 客户端"""
+import json
 from typing import Any, Dict, Optional, Tuple
 
 from core.http_client import HTTPClient, HTTPClientError, RequestConfig
-from .constants import ERROR_MESSAGES
+from .constants import ERROR_MESSAGES, OPENAI_API_ENDPOINTS
+from .sentinel_pow import SentinelTokenGenerator
 import logging
 logger = logging.getLogger(__name__)
 
@@ -34,15 +36,40 @@ class OpenAIHTTPClient(HTTPClient):
         # 默认请求头
         self.default_headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                         "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                         "(KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
             "Accept": "application/json",
-            "Accept-Language": "en-US,en;q=0.9",
-            "Accept-Encoding": "gzip, deflate, br",
+            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+            "Accept-Encoding": "gzip, deflate, br, zstd",
             "Connection": "keep-alive",
             "Sec-Fetch-Dest": "empty",
             "Sec-Fetch-Mode": "cors",
             "Sec-Fetch-Site": "same-site",
+            "sec-ch-ua-platform": "\"Windows\"",
+            "sec-ch-ua": "\"Chromium\";v=\"146\", \"Not-A.Brand\";v=\"24\", \"Google Chrome\";v=\"146\"",
+            "sec-ch-ua-mobile": "?0",
+            "sec-ch-ua-platform-version": "\"10.0.0\"",
+            "sec-ch-ua-model": "\"\"",
+            "sec-ch-ua-bitness": "\"64\"",
+            "sec-ch-ua-arch": "\"x86\"",
+            "sec-ch-ua-full-version": "\"146.0.7680.165\"",
+            "sec-ch-ua-full-version-list": "\"Chromium\";v=\"146.0.7680.165\", \"Not-A.Brand\";v=\"24.0.0.0\", \"Google Chrome\";v=\"146.0.7680.165\"",
         }
+
+        # Sentinel PoW 缓存
+        self._sentinel_payloads: Dict[tuple, Dict[str, str]] = {}
+
+    def build_sentinel_header(self, *, device_id: str, flow: str, token: str = "") -> str:
+        """构建完整的 openai-sentinel-token JSON，优先使用缓存的 PoW payload"""
+        payload = self._sentinel_payloads.get((str(device_id or "").strip(), str(flow or "").strip()))
+        if payload:
+            return json.dumps(payload, separators=(",", ":"))
+        return json.dumps({
+            "p": "",
+            "t": "",
+            "c": str(token or "").strip(),
+            "id": str(device_id or "").strip(),
+            "flow": str(flow or "").strip(),
+        }, separators=(",", ":"))
 
     def check_ip_location(self) -> Tuple[bool, Optional[str]]:
         """
@@ -128,21 +155,31 @@ class OpenAIHTTPClient(HTTPClient):
         except cffi_requests.RequestsError as e:
             raise HTTPClientError(f"OpenAI 请求失败: {endpoint} - {e}")
 
-    def check_sentinel(self, did: str, proxies: Optional[Dict] = None) -> Optional[str]:
+    def check_sentinel(self, did: str, *, flow: str = "authorize_continue") -> Optional[Dict[str, str]]:
         """
-        检查 Sentinel 拦截
+        检查 Sentinel 拦截（含 PoW 生成）
 
         Args:
             did: Device ID
-            proxies: 代理配置
+            flow: Sentinel flow 类型
 
         Returns:
-            Sentinel token 或 None
+            包含 token, p, so 的字典，或 None
         """
-        from .constants import OPENAI_API_ENDPOINTS
-
         try:
-            sen_req_body = f'{{"p":"","id":"{did}","flow":"authorize_continue"}}'
+            device_id = str(did or "").strip()
+            resolved_flow = str(flow or "authorize_continue").strip() or "authorize_continue"
+
+            generator = SentinelTokenGenerator(
+                device_id=device_id,
+                user_agent=self.default_headers.get("User-Agent"),
+            )
+
+            sen_req_body = json.dumps({
+                "p": generator.generate_requirements_token(),
+                "id": device_id,
+                "flow": resolved_flow,
+            }, separators=(",", ":"))
 
             response = self.post(
                 OPENAI_API_ENDPOINTS["sentinel"],
@@ -150,12 +187,47 @@ class OpenAIHTTPClient(HTTPClient):
                     "origin": "https://sentinel.openai.com",
                     "referer": "https://sentinel.openai.com/backend-api/sentinel/frame.html?sv=20260219f9f6",
                     "content-type": "text/plain;charset=UTF-8",
+                    "sec-ch-ua": self.default_headers.get("sec-ch-ua", ""),
+                    "sec-ch-ua-mobile": self.default_headers.get("sec-ch-ua-mobile", ""),
+                    "sec-ch-ua-platform": self.default_headers.get("sec-ch-ua-platform", ""),
                 },
                 data=sen_req_body,
             )
 
             if response.status_code == 200:
-                return response.json().get("token")
+                payload = response.json()
+                token = str(payload.get("token") or "").strip()
+                if not token:
+                    return None
+
+                # 生成 PoW p 字段
+                pow_data = payload.get("proofofwork") or {}
+                if isinstance(pow_data, dict) and pow_data.get("required") and pow_data.get("seed"):
+                    p_value = generator.generate_token(
+                        seed=str(pow_data.get("seed") or ""),
+                        difficulty=str(pow_data.get("difficulty") or "0"),
+                    )
+                else:
+                    p_value = generator.generate_requirements_token()
+
+                # 缓存完整 sentinel payload
+                self._sentinel_payloads[(device_id, resolved_flow)] = {
+                    "p": p_value,
+                    "t": "",
+                    "c": token,
+                    "id": device_id,
+                    "flow": resolved_flow,
+                }
+
+                # 提取 so-token（如果有）
+                so_token = payload.get("so_token") or payload.get("so") or ""
+
+                return {
+                    "token": token,
+                    "p": p_value,
+                    "so": str(so_token).strip(),
+                }
+
             else:
                 logger.warning(f"Sentinel 检查失败: {response.status_code}")
                 return None

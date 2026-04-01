@@ -191,7 +191,9 @@ def _parse_checked_at(value: Any) -> datetime | None:
         return ensure_utc_datetime(value)
     if isinstance(value, str):
         try:
-            return ensure_utc_datetime(datetime.fromisoformat(value.replace("Z", "+00:00")))
+            return ensure_utc_datetime(
+                datetime.fromisoformat(value.replace("Z", "+00:00"))
+            )
         except ValueError:
             return None
     return None
@@ -233,7 +235,9 @@ def _normalize_overview_summary(
     validity_status = _derive_validity_status(lifecycle_status, payload)
     plan_state = _derive_plan_state(lifecycle_status, payload, trial_end_time)
     plan_name = _derive_plan_name(payload)
-    display_status = _derive_display_status(lifecycle_status, validity_status, plan_state)
+    display_status = _derive_display_status(
+        lifecycle_status, validity_status, plan_state
+    )
 
     payload["chips"] = _dedupe_chips(payload.get("chips") or [])
     if bool(payload.get("local_matches_target")) and "当前" not in payload["chips"]:
@@ -268,7 +272,9 @@ def _legacy_extra_payload(extra: dict[str, Any]) -> dict[str, Any]:
     return legacy_extra
 
 
-def _platform_credentials_from_extra(extra: dict[str, Any], *, legacy_token: str = "") -> list[dict[str, Any]]:
+def _platform_credentials_from_extra(
+    extra: dict[str, Any], *, legacy_token: str = ""
+) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     seen: set[str] = set()
 
@@ -301,7 +307,9 @@ def _platform_credentials_from_extra(extra: dict[str, Any], *, legacy_token: str
         for item in rows:
             item["is_primary"] = item["key"] == primary_key
     elif rows:
-        token_keys = [item["key"] for item in rows if item["credential_type"] == "token"]
+        token_keys = [
+            item["key"] for item in rows if item["credential_type"] == "token"
+        ]
         primary = token_keys[0] if token_keys else rows[0]["key"]
         for item in rows:
             item["is_primary"] = item["key"] == primary
@@ -321,7 +329,8 @@ def _normalize_platform_credentials(
         normalized[key] = {
             "scope": "platform",
             "provider_name": platform,
-            "credential_type": _text(raw.get("credential_type")) or _infer_credential_type(key),
+            "credential_type": _text(raw.get("credential_type"))
+            or _infer_credential_type(key),
             "key": key,
             "value": _text(value),
             "is_primary": bool(raw.get("is_primary")),
@@ -329,7 +338,9 @@ def _normalize_platform_credentials(
             "metadata": _safe_dict(raw.get("metadata")),
         }
 
-    primary_key = next((key for key, item in normalized.items() if item.get("is_primary")), "")
+    primary_key = next(
+        (key for key, item in normalized.items() if item.get("is_primary")), ""
+    )
     if not primary_key:
         preferred = _default_primary_token_key(platform)
         if preferred in normalized:
@@ -356,10 +367,16 @@ def _merge_platform_credentials(
     *,
     prefer_existing: bool,
 ) -> list[dict[str, Any]]:
+    incoming_keys = {
+        _text(item.get("key")) for item in incoming if _text(item.get("key"))
+    }
+    filtered_existing = [
+        item for item in existing if _text(item.get("key")) not in incoming_keys
+    ]
     if prefer_existing:
-        merged = list(incoming) + list(existing)
+        merged = list(incoming) + filtered_existing
     else:
-        merged = list(existing) + list(incoming)
+        merged = filtered_existing + list(incoming)
     return _normalize_platform_credentials(platform, merged)
 
 
@@ -397,20 +414,37 @@ def _provider_accounts_from_extra(extra: dict[str, Any]) -> list[dict[str, Any]]
         item = _safe_dict(raw)
         provider_type = _text(item.get("provider_type") or "mailbox") or "mailbox"
         provider_name = _text(item.get("provider_name") or item.get("provider"))
-        login_identifier = _text(item.get("login_identifier") or item.get("email") or item.get("username"))
-        display_name = _text(item.get("display_name") or login_identifier or provider_name)
+        login_identifier = _text(
+            item.get("login_identifier") or item.get("email") or item.get("username")
+        )
+        display_name = _text(
+            item.get("display_name") or login_identifier or provider_name
+        )
         credentials = _safe_dict(item.get("credentials"))
         metadata = _safe_dict(item.get("metadata"))
-        for field in ("email", "username", "account_id", "api_url", "login_url", "auth_type"):
+        for field in (
+            "email",
+            "username",
+            "account_id",
+            "api_url",
+            "login_url",
+            "auth_type",
+        ):
             text = _text(item.get(field))
             if text and field not in metadata:
                 metadata[field] = text
         key = (provider_type, provider_name, login_identifier)
         existing = normalized.get(key)
         if existing:
-            existing["credentials"].update({k: v for k, v in credentials.items() if _text(v)})
+            existing["credentials"].update(
+                {k: v for k, v in credentials.items() if _text(v)}
+            )
             existing["metadata"].update(
-                {k: v for k, v in metadata.items() if _text(v) or isinstance(v, (dict, list))}
+                {
+                    k: v
+                    for k, v in metadata.items()
+                    if _text(v) or isinstance(v, (dict, list))
+                }
             )
         else:
             normalized[key] = {
@@ -481,7 +515,12 @@ def _provider_resources_from_extra(extra: dict[str, Any]) -> list[dict[str, Any]
             text = _text(item.get(field))
             if text and field not in metadata:
                 metadata[field] = text
-        key = (provider_type, provider_name, resource_type, resource_identifier or handle)
+        key = (
+            provider_type,
+            provider_name,
+            resource_type,
+            resource_identifier or handle,
+        )
         normalized[key] = {
             "provider_type": provider_type,
             "provider_name": provider_name,
@@ -501,8 +540,12 @@ def _merge_provider_accounts(
     prefer_existing: bool,
 ) -> list[dict[str, Any]]:
     if prefer_existing:
-        return _provider_accounts_from_extra({"provider_accounts": list(incoming) + list(existing)})
-    return _provider_accounts_from_extra({"provider_accounts": list(existing) + list(incoming)})
+        return _provider_accounts_from_extra(
+            {"provider_accounts": list(incoming) + list(existing)}
+        )
+    return _provider_accounts_from_extra(
+        {"provider_accounts": list(existing) + list(incoming)}
+    )
 
 
 def _merge_provider_resources(
@@ -512,8 +555,12 @@ def _merge_provider_resources(
     prefer_existing: bool,
 ) -> list[dict[str, Any]]:
     if prefer_existing:
-        return _provider_resources_from_extra({"provider_resources": list(incoming) + list(existing)})
-    return _provider_resources_from_extra({"provider_resources": list(existing) + list(incoming)})
+        return _provider_resources_from_extra(
+            {"provider_resources": list(incoming) + list(existing)}
+        )
+    return _provider_resources_from_extra(
+        {"provider_resources": list(existing) + list(incoming)}
+    )
 
 
 def _serialize_overview_model(model: AccountOverviewModel) -> dict[str, Any]:
@@ -557,7 +604,9 @@ def _serialize_provider_account_model(model: ProviderAccountModel) -> dict[str, 
         "login_identifier": model.login_identifier,
         "display_name": model.display_name,
         "credentials": credentials,
-        "credential_previews": {key: _preview_secret(value) for key, value in credentials.items()},
+        "credential_previews": {
+            key: _preview_secret(value) for key, value in credentials.items()
+        },
         "metadata": model.get_metadata(),
     }
 
@@ -575,8 +624,12 @@ def _serialize_provider_resource_model(model: ProviderResourceModel) -> dict[str
     }
 
 
-def load_account_graphs(session: Session, account_ids: list[int]) -> dict[int, dict[str, Any]]:
-    normalized_ids = [int(account_id) for account_id in account_ids if int(account_id or 0) > 0]
+def load_account_graphs(
+    session: Session, account_ids: list[int]
+) -> dict[int, dict[str, Any]]:
+    normalized_ids = [
+        int(account_id) for account_id in account_ids if int(account_id or 0) > 0
+    ]
     if not normalized_ids:
         return {}
 
@@ -590,22 +643,53 @@ def load_account_graphs(session: Session, account_ids: list[int]) -> dict[int, d
         for account_id in normalized_ids
     }
 
-    for item in session.exec(select(AccountOverviewModel).where(AccountOverviewModel.account_id.in_(normalized_ids))).all():
+    for item in session.exec(
+        select(AccountOverviewModel).where(
+            AccountOverviewModel.account_id.in_(normalized_ids)
+        )
+    ).all():
         graphs[int(item.account_id)]["overview"] = _serialize_overview_model(item)
-    for item in session.exec(select(AccountCredentialModel).where(AccountCredentialModel.account_id.in_(normalized_ids))).all():
-        graphs[int(item.account_id)]["credentials"].append(_serialize_credential_model(item))
-    for item in session.exec(select(ProviderAccountModel).where(ProviderAccountModel.account_id.in_(normalized_ids))).all():
-        graphs[int(item.account_id)]["provider_accounts"].append(_serialize_provider_account_model(item))
-    for item in session.exec(select(ProviderResourceModel).where(ProviderResourceModel.account_id.in_(normalized_ids))).all():
-        graphs[int(item.account_id)]["provider_resources"].append(_serialize_provider_resource_model(item))
+    for item in session.exec(
+        select(AccountCredentialModel).where(
+            AccountCredentialModel.account_id.in_(normalized_ids)
+        )
+    ).all():
+        graphs[int(item.account_id)]["credentials"].append(
+            _serialize_credential_model(item)
+        )
+    for item in session.exec(
+        select(ProviderAccountModel).where(
+            ProviderAccountModel.account_id.in_(normalized_ids)
+        )
+    ).all():
+        graphs[int(item.account_id)]["provider_accounts"].append(
+            _serialize_provider_account_model(item)
+        )
+    for item in session.exec(
+        select(ProviderResourceModel).where(
+            ProviderResourceModel.account_id.in_(normalized_ids)
+        )
+    ).all():
+        graphs[int(item.account_id)]["provider_resources"].append(
+            _serialize_provider_resource_model(item)
+        )
 
     for account_id, payload in graphs.items():
         overview = _safe_dict(payload.get("overview"))
-        payload["lifecycle_status"] = _text(overview.get("lifecycle_status") or "registered") or "registered"
-        payload["validity_status"] = _text(overview.get("validity_status") or "unknown") or "unknown"
-        payload["plan_state"] = _text(overview.get("plan_state") or "unknown") or "unknown"
+        payload["lifecycle_status"] = (
+            _text(overview.get("lifecycle_status") or "registered") or "registered"
+        )
+        payload["validity_status"] = (
+            _text(overview.get("validity_status") or "unknown") or "unknown"
+        )
+        payload["plan_state"] = (
+            _text(overview.get("plan_state") or "unknown") or "unknown"
+        )
         payload["plan_name"] = _text(overview.get("plan_name"))
-        payload["display_status"] = _text(overview.get("display_status") or payload["lifecycle_status"]) or "registered"
+        payload["display_status"] = (
+            _text(overview.get("display_status") or payload["lifecycle_status"])
+            or "registered"
+        )
         payload["verification_mailbox"] = next(
             (
                 resource
@@ -647,11 +731,14 @@ def _persist_account_graph(
 ) -> None:
     normalized_summary = _normalize_overview_summary(
         platform=platform,
-        lifecycle_status=_text(summary.get("lifecycle_status") or "registered") or "registered",
+        lifecycle_status=_text(summary.get("lifecycle_status") or "registered")
+        or "registered",
         summary=summary,
     )
     overview = session.exec(
-        select(AccountOverviewModel).where(AccountOverviewModel.account_id == account_id)
+        select(AccountOverviewModel).where(
+            AccountOverviewModel.account_id == account_id
+        )
     ).first()
     if not overview:
         overview = AccountOverviewModel(account_id=account_id)
@@ -666,7 +753,11 @@ def _persist_account_graph(
     overview.updated_at = _utcnow()
     session.add(overview)
 
-    session.exec(delete(AccountCredentialModel).where(AccountCredentialModel.account_id == account_id))
+    session.exec(
+        delete(AccountCredentialModel).where(
+            AccountCredentialModel.account_id == account_id
+        )
+    )
     for item in _normalize_platform_credentials(platform, platform_credentials):
         session.add(
             AccountCredentialModel(
@@ -678,12 +769,22 @@ def _persist_account_graph(
                 value=item["value"],
                 is_primary=bool(item.get("is_primary")),
                 source=item.get("source", ""),
-                metadata_json=json.dumps(item.get("metadata") or {}, ensure_ascii=False),
+                metadata_json=json.dumps(
+                    item.get("metadata") or {}, ensure_ascii=False
+                ),
             )
         )
 
-    session.exec(delete(ProviderResourceModel).where(ProviderResourceModel.account_id == account_id))
-    session.exec(delete(ProviderAccountModel).where(ProviderAccountModel.account_id == account_id))
+    session.exec(
+        delete(ProviderResourceModel).where(
+            ProviderResourceModel.account_id == account_id
+        )
+    )
+    session.exec(
+        delete(ProviderAccountModel).where(
+            ProviderAccountModel.account_id == account_id
+        )
+    )
     for item in provider_accounts:
         provider_account = ProviderAccountModel(
             account_id=account_id,
@@ -755,12 +856,26 @@ def sync_legacy_account_graph(
             **_safe_dict(legacy_summary.get("legacy_extra")),
             **_safe_dict(existing_summary.get("legacy_extra")),
         }
-    summary["chips"] = _dedupe_chips(legacy_summary.get("chips") or [], existing_summary.get("chips") or [])
-    summary["lifecycle_status"] = _text(current.get("lifecycle_status")) or _text(legacy_summary.get("lifecycle_status")) or "registered"
+    summary["chips"] = _dedupe_chips(
+        legacy_summary.get("chips") or [], existing_summary.get("chips") or []
+    )
+    summary["lifecycle_status"] = (
+        _text(current.get("lifecycle_status"))
+        or _text(legacy_summary.get("lifecycle_status"))
+        or "registered"
+    )
 
-    existing_credentials = [item for item in current.get("credentials") or [] if item.get("scope") == "platform"]
-    incoming_credentials = _platform_credentials_from_extra({**payload_extra, "platform": platform}, legacy_token=_text(legacy_token))
-    credentials = _merge_platform_credentials(platform, existing_credentials, incoming_credentials, prefer_existing=True)
+    existing_credentials = [
+        item
+        for item in current.get("credentials") or []
+        if item.get("scope") == "platform"
+    ]
+    incoming_credentials = _platform_credentials_from_extra(
+        {**payload_extra, "platform": platform}, legacy_token=_text(legacy_token)
+    )
+    credentials = _merge_platform_credentials(
+        platform, existing_credentials, incoming_credentials, prefer_existing=True
+    )
 
     provider_accounts = _merge_provider_accounts(
         current.get("provider_accounts") or [],
@@ -791,11 +906,19 @@ def sync_account_graph(session: Session, model: AccountModel) -> None:
 
     current = _graph_for_account(session, account_id)
     summary = _safe_dict(current.get("overview"))
-    summary["lifecycle_status"] = _text(current.get("lifecycle_status")) or _text(summary.get("lifecycle_status")) or "registered"
+    summary["lifecycle_status"] = (
+        _text(current.get("lifecycle_status"))
+        or _text(summary.get("lifecycle_status"))
+        or "registered"
+    )
     summary["chips"] = _dedupe_chips(summary.get("chips") or [])
 
     platform = model.platform
-    credentials = [item for item in current.get("credentials") or [] if item.get("scope") == "platform"]
+    credentials = [
+        item
+        for item in current.get("credentials") or []
+        if item.get("scope") == "platform"
+    ]
     provider_accounts = list(current.get("provider_accounts") or [])
     provider_resources = list(current.get("provider_resources") or [])
 
@@ -810,7 +933,9 @@ def sync_account_graph(session: Session, model: AccountModel) -> None:
     )
 
 
-def sync_platform_account_graph(session: Session, model: AccountModel, account: Any) -> None:
+def sync_platform_account_graph(
+    session: Session, model: AccountModel, account: Any
+) -> None:
     account_id = int(model.id or 0)
     if account_id <= 0:
         return
@@ -831,7 +956,16 @@ def sync_platform_account_graph(session: Session, model: AccountModel, account: 
             **_safe_dict(incoming_summary.get("legacy_extra")),
             **legacy_extra,
         }
-    lifecycle_status = _text(getattr(getattr(account, "status", None), "value", getattr(account, "status", ""))) or "registered"
+    lifecycle_status = (
+        _text(
+            getattr(
+                getattr(account, "status", None),
+                "value",
+                getattr(account, "status", ""),
+            )
+        )
+        or "registered"
+    )
     existing_summary = _safe_dict(current.get("overview"))
     summary = dict(existing_summary)
     summary.update(incoming_summary)
@@ -840,13 +974,24 @@ def sync_platform_account_graph(session: Session, model: AccountModel, account: 
             **_safe_dict(existing_summary.get("legacy_extra")),
             **_safe_dict(incoming_summary.get("legacy_extra")),
         }
-    summary["chips"] = _dedupe_chips(existing_summary.get("chips") or [], incoming_summary.get("chips") or [])
+    summary["chips"] = _dedupe_chips(
+        existing_summary.get("chips") or [], incoming_summary.get("chips") or []
+    )
     summary["lifecycle_status"] = lifecycle_status
 
     platform = model.platform
-    existing_credentials = [item for item in current.get("credentials") or [] if item.get("scope") == "platform"]
-    incoming_credentials = _platform_credentials_from_extra({**extra, "platform": platform}, legacy_token=_text(getattr(account, "token", "")))
-    credentials = _merge_platform_credentials(platform, existing_credentials, incoming_credentials, prefer_existing=False)
+    existing_credentials = [
+        item
+        for item in current.get("credentials") or []
+        if item.get("scope") == "platform"
+    ]
+    incoming_credentials = _platform_credentials_from_extra(
+        {**extra, "platform": platform},
+        legacy_token=_text(getattr(account, "token", "")),
+    )
+    credentials = _merge_platform_credentials(
+        platform, existing_credentials, incoming_credentials, prefer_existing=False
+    )
 
     provider_accounts = _merge_provider_accounts(
         current.get("provider_accounts") or [],
@@ -900,10 +1045,18 @@ def patch_account_graph(
         summary["region"] = region
     if trial_end_time is not None:
         summary["trial_end_time"] = int(trial_end_time or 0)
-    effective_lifecycle = _text(lifecycle_status) or _text(current.get("lifecycle_status")) or "registered"
+    effective_lifecycle = (
+        _text(lifecycle_status)
+        or _text(current.get("lifecycle_status"))
+        or "registered"
+    )
     summary["lifecycle_status"] = effective_lifecycle
 
-    existing_credentials = [item for item in current.get("credentials") or [] if item.get("scope") == "platform"]
+    existing_credentials = [
+        item
+        for item in current.get("credentials") or []
+        if item.get("scope") == "platform"
+    ]
     incoming_credentials: list[dict[str, Any]] = []
     if credential_updates:
         for key, value in credential_updates.items():
@@ -943,7 +1096,12 @@ def patch_account_graph(
                 "metadata": {},
             }
         )
-    credentials = _merge_platform_credentials(model.platform, existing_credentials, incoming_credentials, prefer_existing=False)
+    credentials = _merge_platform_credentials(
+        model.platform,
+        existing_credentials,
+        incoming_credentials,
+        prefer_existing=False,
+    )
 
     current_provider_accounts = current.get("provider_accounts") or []
     next_provider_accounts = current_provider_accounts
@@ -951,7 +1109,9 @@ def patch_account_graph(
         next_provider_accounts = (
             _provider_accounts_from_extra({"provider_accounts": provider_accounts})
             if replace_provider_accounts
-            else _merge_provider_accounts(current_provider_accounts, provider_accounts, prefer_existing=False)
+            else _merge_provider_accounts(
+                current_provider_accounts, provider_accounts, prefer_existing=False
+            )
         )
 
     current_provider_resources = current.get("provider_resources") or []
@@ -960,7 +1120,9 @@ def patch_account_graph(
         next_provider_resources = (
             _provider_resources_from_extra({"provider_resources": provider_resources})
             if replace_provider_resources
-            else _merge_provider_resources(current_provider_resources, provider_resources, prefer_existing=False)
+            else _merge_provider_resources(
+                current_provider_resources, provider_resources, prefer_existing=False
+            )
         )
 
     _persist_account_graph(
@@ -983,10 +1145,26 @@ def sync_all_account_graphs(session: Session) -> None:
 
 
 def purge_account_graph(session: Session, account_id: int) -> None:
-    session.exec(delete(AccountCredentialModel).where(AccountCredentialModel.account_id == account_id))
-    session.exec(delete(ProviderResourceModel).where(ProviderResourceModel.account_id == account_id))
-    session.exec(delete(ProviderAccountModel).where(ProviderAccountModel.account_id == account_id))
-    session.exec(delete(AccountOverviewModel).where(AccountOverviewModel.account_id == account_id))
+    session.exec(
+        delete(AccountCredentialModel).where(
+            AccountCredentialModel.account_id == account_id
+        )
+    )
+    session.exec(
+        delete(ProviderResourceModel).where(
+            ProviderResourceModel.account_id == account_id
+        )
+    )
+    session.exec(
+        delete(ProviderAccountModel).where(
+            ProviderAccountModel.account_id == account_id
+        )
+    )
+    session.exec(
+        delete(AccountOverviewModel).where(
+            AccountOverviewModel.account_id == account_id
+        )
+    )
 
 
 def matches_status_filter(graph: dict[str, Any], status: str) -> bool:
@@ -1001,7 +1179,9 @@ def matches_status_filter(graph: dict[str, Any], status: str) -> bool:
     }
 
 
-def compute_account_stats(graphs: list[dict[str, Any]], platforms: list[str]) -> dict[str, dict[str, int]]:
+def compute_account_stats(
+    graphs: list[dict[str, Any]], platforms: list[str]
+) -> dict[str, dict[str, int]]:
     by_platform: dict[str, int] = defaultdict(int)
     by_lifecycle_status: dict[str, int] = defaultdict(int)
     by_plan_state: dict[str, int] = defaultdict(int)

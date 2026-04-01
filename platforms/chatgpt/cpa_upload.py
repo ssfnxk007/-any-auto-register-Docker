@@ -32,6 +32,7 @@ def _decode_jwt_payload(token: str) -> dict:
 def _get_config_value(key: str) -> str:
     try:
         from core.config_store import config_store
+
         return config_store.get(key, "")
     except Exception:
         return ""
@@ -57,11 +58,14 @@ def generate_token_json(account) -> dict:
         auth_info = payload.get("https://api.openai.com/auth", {})
         account_id = auth_info.get("chatgpt_account_id", "")
         chatgpt_account_id = auth_info.get("chatgpt_account_id", "")
-        chatgpt_user_id = auth_info.get("chatgpt_user_id", "") or auth_info.get("user_id", "")
+        chatgpt_user_id = auth_info.get("chatgpt_user_id", "") or auth_info.get(
+            "user_id", ""
+        )
         exp_timestamp = payload.get("exp")
         if isinstance(exp_timestamp, int) and exp_timestamp > 0:
             exp_dt = datetime.fromtimestamp(
-                exp_timestamp, tz=timezone(timedelta(hours=8)))
+                exp_timestamp, tz=timezone(timedelta(hours=8))
+            )
             expired_str = exp_dt.strftime("%Y-%m-%dT%H:%M:%S+08:00")
 
     now = datetime.now(tz=timezone(timedelta(hours=8)))
@@ -174,9 +178,11 @@ def upload_to_team_manager(
         "email": email,
         "access_token": access_token,
         "session_token": getattr(account, "session_token", ""),
-        "refresh_token": getattr(account, "refresh_token", ""),
         "client_id": getattr(account, "client_id", ""),
     }
+    refresh_token = getattr(account, "refresh_token", "")
+    if refresh_token:
+        payload["refresh_token"] = refresh_token
 
     try:
         resp = cffi_requests.post(
@@ -203,7 +209,9 @@ def upload_to_team_manager(
         return False, f"上传异常: {str(e)}"
 
 
-def test_cpa_connection(api_url: str, api_token: str, proxy: str = None) -> Tuple[bool, str]:
+def test_cpa_connection(
+    api_url: str, api_token: str, proxy: str = None
+) -> Tuple[bool, str]:
     """测试 CPA 连接（不走代理）"""
     if not api_url:
         return False, "API URL 不能为空"
